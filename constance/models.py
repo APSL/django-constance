@@ -6,6 +6,7 @@ def create_perm(app, created_models, verbosity, db, **kwargs):
     Creates a fake content type and permission
     to be able to check for permissions
     """
+    from django import VERSION
     from django.contrib.auth.models import Permission
     from django.contrib.contenttypes.models import ContentType
 
