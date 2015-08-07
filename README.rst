@@ -8,7 +8,7 @@ Constance - Dynamic Django settings
 A Django app for storing dynamic settings in pluggable backends (Redis and
 Django model backend built in) with an integration with the Django admin app.
 
-**This fork has is compatible with Django 1.8.**
+**This fork is compatible with Django 1.8.**
 
 For more information see the documentation at:
 
