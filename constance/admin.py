@@ -44,7 +44,7 @@ FIELDS = {
     float: (fields.FloatField, {'widget': NUMERIC_WIDGET}),
 }
 
-INITIAL_HASH_SESSION = "constance_initial_hash"
+HASH_SESSION_KEY = "constance_hash_version"
 
 
 def parse_additional_fields(fields):
@@ -77,7 +77,9 @@ class ConstanceForm(forms.Form):
 
     def __init__(self, initial, request, *args, **kwargs):
         super(ConstanceForm, self).__init__(*args, initial=initial, **kwargs)
-        version_hash = request.session.get(INITIAL_HASH_SESSION, hashlib.md5())
+        self.request = request
+
+        version_hash = hashlib.md5()
 
         for name, options in settings.CONFIG.items():
             default, help_text = options[0], options[1]
@@ -97,11 +99,21 @@ class ConstanceForm(forms.Form):
             self.fields[name] = field_class(label=name, **kwargs)
 
             version_hash.update(smart_bytes(initial.get(name, '')))
-        self.initial['version'] = version_hash.hexdigest()
+
+        # Check if session hash exists
+        shash = request.session.get(HASH_SESSION_KEY)
+        if shash:
+            self.initial['version'] = shash
+        else:
+            self.initial['version'] = version_hash.hexdigest()
 
     def save(self):
         for name in settings.CONFIG:
             setattr(config, name, self.cleaned_data[name])
+        try:
+            del self.request.session[HASH_SESSION_KEY]
+        except KeyError:
+            pass
 
     def clean_version(self):
         value = self.cleaned_data['version']
