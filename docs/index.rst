@@ -16,11 +16,11 @@ Install from PyPI the backend specific variant of django-constance:
 
 For the (default) Redis backend::
 
-    pip install django-constance[redis]
+    pip install "django-constance[redis]"
 
 For the database backend::
 
-    pip install django-constance[database]
+    pip install "django-constance[database]"
 
 Alternatively -- if you're sure that the dependencies are already
 installed -- you can also run::
@@ -52,6 +52,33 @@ admin will show.
 
 See the :ref:`Backends <backends>` section how to setup the backend and
 finish the configuration.
+
+Custom fields
+-------------
+
+You can set the field type by the third value in the `CONSTANCE_CONFIG`
+tuple. The value can be string or one of the supported types:
+
+.. code-block:: python
+        'THE_ANSWER': (42, 'Answer to the Ultimate Question of Life, '
+                                   'The Universe, and Everything', str),
+
+If you can add your custom field types, you can use the
+`CONSTANCE_ADDITIONAL_FIELDS` variable. Note that you must
+use later evaluated strings instead of direct classes:
+
+.. code-block:: python
+        CONSTANCE_ADDITIONAL_FIELDS = {
+           'yes_no_null_select': ['django.forms.fields.ChoiceField',
+              {
+              'widget': 'django.forms.Select',
+              'choices': (("-----", None), ("yes", "Yes"), ("no", "No"))
+              }],
+        }
+
+       CONSTANCE_CONFIG = {
+           'MY_SELECT_KEY': ('yes', 'select yes or no', 'yes_no_null_select'),
+       }
 
 Usage
 -----
@@ -126,6 +153,32 @@ setting to ``False`` and give the users or user groups access to the
 
    The virtual application ``Constance`` among your regular applications.
 
+Custom settings form
+--------------------
+
+If you aim at creating a custom settings form this is possible in the following
+way: You can inherit from ``ConstanceAdmin`` and set the ``form`` property on
+your custom admin to use your custom form. This allows you to define your own
+formsets and layouts, similar to defining a custom form on a standard
+Django ModelAdmin. This way you can fully style your settings form and group
+settings the way you like.
+
+.. code-block:: python
+
+    from constance.admin import ConstanceAdmin, ConstanceForm, Config
+    class CustomConfigForm(ConstanceForm):
+          def __init__(self, *args, **kwargs):
+            super(CustomConfigForm, self).__init__(*args, **kwargs)
+            #... do stuff to make your settings form nice ...
+
+    class ConfigAdmin(ConstanceAdmin):
+        form = CustomConfigForm
+        change_list_template = 'admin/config/settings.html'
+
+    admin.site.unregister([Config])
+    admin.site.register([Config], ConfigAdmin)
+
+
 More documentation
 ------------------
 
@@ -133,6 +186,7 @@ More documentation
    :maxdepth: 2
 
    backends
+   testing
    changes
 
 Indices and tables

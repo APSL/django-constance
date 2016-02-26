@@ -3,28 +3,21 @@ from decimal import Decimal
 import hashlib
 from operator import itemgetter
 
-from django import forms
+from django import forms, VERSION
+from django.conf.urls import url
 from django.contrib import admin, messages
 from django.contrib.admin import widgets
 from django.contrib.admin.options import csrf_protect_m
 from django.core.exceptions import PermissionDenied, ImproperlyConfigured
 from django.forms import fields
 from django.http import HttpResponseRedirect
-from django.shortcuts import render_to_response
-from django.template.context import RequestContext
+from django.template.response import TemplateResponse
 from django.utils import six
+from django.utils.encoding import smart_bytes
 from django.utils.formats import localize
+from django.utils.module_loading import import_string
 from django.utils.translation import ugettext_lazy as _
-
-try:
-    from django.utils.encoding import smart_bytes
-except ImportError:
-    from django.utils.encoding import smart_str as smart_bytes
-
-try:
-    from django.conf.urls import patterns, url
-except ImportError:  # Django < 1.4
-    from django.conf.urls.defaults import patterns, url
+import django
 
 
 from . import LazyConfig, settings
@@ -51,6 +44,25 @@ FIELDS = {
     float: (fields.FloatField, {'widget': NUMERIC_WIDGET}),
 }
 
+
+def parse_additional_fields(fields):
+    for key in fields:
+        field = fields[key]
+
+        field[0] = import_string(field[0])
+
+        if 'widget' in field[1]:
+            klass = import_string(field[1]['widget'])
+            field[1]['widget'] = klass(**(field[1].get('widget_kwargs', {}) or {}))
+
+            if 'widget_kwargs' in field[1]:
+                del field[1]['widget_kwargs']
+
+    return fields
+
+
+FIELDS.update(parse_additional_fields(settings.ADDITIONAL_FIELDS))
+
 if not six.PY3:
     FIELDS.update({
         long: INTEGER_LIKE,
@@ -65,8 +77,13 @@ class ConstanceForm(forms.Form):
         super(ConstanceForm, self).__init__(*args, initial=initial, **kwargs)
         version_hash = hashlib.md5()
 
-        for name, (default, help_text) in settings.CONFIG.items():
-            config_type = type(default)
+        for name, options in settings.CONFIG.items():
+            default, help_text = options[0], options[1]
+            if len(options) == 3:
+               config_type = options[2]
+            else:
+               config_type = type(default)
+
             if config_type not in FIELDS:
                 raise ImproperlyConfigured(_("Constance doesn't support "
                                              "config values of the type "
@@ -94,31 +111,33 @@ class ConstanceForm(forms.Form):
 
 
 class ConstanceAdmin(admin.ModelAdmin):
+    change_list_template = 'admin/constance/change_list.html'
+    change_list_form = ConstanceForm
 
     def get_urls(self):
         info = self.model._meta.app_label, self.model._meta.module_name
-        return patterns('',
+        return [
             url(r'^$',
                 self.admin_site.admin_view(self.changelist_view),
                 name='%s_%s_changelist' % info),
             url(r'^$',
                 self.admin_site.admin_view(self.changelist_view),
                 name='%s_%s_add' % info),
-        )
+        ]
 
     @csrf_protect_m
     def changelist_view(self, request, extra_context=None):
         # First load a mapping between config name and default value
         if not self.has_change_permission(request, None):
             raise PermissionDenied
-        default_initial = ((name, default)
-            for name, (default, help_text) in settings.CONFIG.items())
+        default_initial = ((name, options[0])
+            for name, options in settings.CONFIG.items())
         # Then update the mapping with actually values from the backend
         initial = dict(default_initial,
             **dict(config._backend.mget(settings.CONFIG.keys())))
-        form = ConstanceForm(initial=initial)
+        form = self.change_list_form(initial=initial)
         if request.method == 'POST':
-            form = ConstanceForm(data=request.POST, initial=initial)
+            form = self.change_list_form(data=request.POST, initial=initial)
             if form.is_valid():
                 form.save()
                 # In django 1.5 this can be replaced with self.message_user
@@ -129,20 +148,22 @@ class ConstanceAdmin(admin.ModelAdmin):
                 )
                 return HttpResponseRedirect('.')
         context = {
-            'config': [],
+            'config_values': [],
             'title': _('Constance config'),
             'app_label': 'constance',
             'opts': Config._meta,
             'form': form,
             'media': self.media + form.media,
+            'icon_type': 'gif' if VERSION < (1, 9) else 'svg',
         }
-        for name, (default, help_text) in settings.CONFIG.items():
+        for name, options in settings.CONFIG.items():
+            default, help_text = options[0], options[1]
             # First try to load the value from the actual backend
             value = initial.get(name)
             # Then if the returned value is None, get the default
             if value is None:
                 value = getattr(config, name)
-            context['config'].append({
+            context['config_values'].append({
                 'name': name,
                 'default': localize(default),
                 'help_text': _(help_text),
@@ -150,11 +171,12 @@ class ConstanceAdmin(admin.ModelAdmin):
                 'modified': value != default,
                 'form_field': form[name],
             })
-        context['config'].sort(key=itemgetter('name'))
-        context_instance = RequestContext(request,
-                                          current_app=self.admin_site.name)
-        return render_to_response('admin/constance/change_list.html',
-            context, context_instance=context_instance)
+        context['config_values'].sort(key=itemgetter('name'))
+        request.current_app = self.admin_site.name
+        # compatibility to be removed when 1.7 is deprecated
+        extra = {'current_app': self.admin_site.name} if VERSION < (1, 8) else {}
+        return TemplateResponse(request, self.change_list_template, context,
+                                **extra)
 
     def has_add_permission(self, *args, **kwargs):
         return False
@@ -174,9 +196,11 @@ class Config(object):
         object_name = 'Config'
         model_name = module_name = 'config'
         verbose_name_plural = _('config')
-        get_ordered_objects = lambda x: False
         abstract = False
         swapped = False
+
+        def get_ordered_objects(self):
+            return False
 
         def get_change_permission(self):
             return 'change_%s' % self.model_name
