@@ -44,6 +44,8 @@ FIELDS = {
     float: (fields.FloatField, {'widget': NUMERIC_WIDGET}),
 }
 
+INITIAL_HASH_SESSION = "constance_initial_hash"
+
 
 def parse_additional_fields(fields):
     for key in fields:
@@ -73,9 +75,9 @@ if not six.PY3:
 class ConstanceForm(forms.Form):
     version = forms.CharField(widget=forms.HiddenInput)
 
-    def __init__(self, initial, *args, **kwargs):
+    def __init__(self, initial, request, *args, **kwargs):
         super(ConstanceForm, self).__init__(*args, initial=initial, **kwargs)
-        version_hash = hashlib.md5()
+        version_hash = request.session.get(INITIAL_HASH_SESSION, hashlib.md5())
 
         for name, options in settings.CONFIG.items():
             default, help_text = options[0], options[1]
@@ -135,9 +137,10 @@ class ConstanceAdmin(admin.ModelAdmin):
         # Then update the mapping with actually values from the backend
         initial = dict(default_initial,
             **dict(config._backend.mget(settings.CONFIG.keys())))
-        form = self.change_list_form(initial=initial)
+        form = self.change_list_form(initial=initial, request=request)
         if request.method == 'POST':
-            form = self.change_list_form(data=request.POST, initial=initial)
+            form = self.change_list_form(data=request.POST, initial=initial,
+                                         request=request)
             if form.is_valid():
                 form.save()
                 # In django 1.5 this can be replaced with self.message_user
